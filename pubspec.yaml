@@ -1,0 +1,61 @@
+name: itc_openpay_package
+description: Flutter package para integración con OpenPay de BBVA. Procesa pagos, tokenización de tarjetas y manejo de transacciones seguras.
+version: 0.1.0
+
+# Publica el paquete en pub.dev removiendo la siguiente línea cuando esté listo
+publish_to: 'none'
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: ">=3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # Cliente HTTP
+  http: ^1.2.0
+  
+  # Estado reactivamente con Riverpod
+  flutter_riverpod: ^2.5.1
+  
+  # Para validación de formularios
+  form_validator: ^1.0.2
+  
+  # Para manejo de fechas
+  intl: ^0.19.0
+  
+  # Generación de device_session_id
+  uuid: ^4.3.1
+  font_awesome_flutter: ^10.12.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  
+  # Linting
+  flutter_lints: ^4.0.0
+  
+  # Para testing de HTTP
+  mockito: ^5.4.2
+
+# For information on the generic Dart part of this file, see the
+# following page: https://dart.dev/tools/pub/pubspec
+
+# The following section is specific to Flutter packages.
+flutter:
+  
+  # Para paquetes Flutter, no se necesita uses-material-design por defecto
+  # Los usuarios del paquete configurarán esto en sus aplicaciones
+  assets:
+    - assets/images/cards/
+    - assets/images/stores/
+  
+topics:
+  - flutter
+  - dart
+  - openpay
+  - bbva
+  - payments
+  - credit-card
+  - tokenization
