@@ -38,6 +38,12 @@ class PaymentButton extends ConsumerStatefulWidget {
   
   /// Callback durante el procesamiento
   final void Function()? onProcessing;
+
+  /// Callback cuando se requiere autenticación 3D Secure adicional
+  final void Function(String redirectUrl, ChargeModel charge)? onRequires3DS;
+
+  /// URL de retorno que OpenPay debe usar al completar 3D Secure
+  final String? threeDSecureRedirectUrl;
   
   /// Texto del botón
   final String buttonText;
@@ -67,6 +73,8 @@ class PaymentButton extends ConsumerStatefulWidget {
     this.style,
     this.enabled = true,
     this.deviceSessionId,
+    this.onRequires3DS,
+    this.threeDSecureRedirectUrl,
   });
   
   @override
@@ -124,7 +132,27 @@ class _PaymentButtonState extends ConsumerState<PaymentButton>
         orderId: widget.orderId,
         metadata: widget.metadata,
         deviceSessionId: widget.deviceSessionId,
+        useThreeDSecure: widget.onRequires3DS != null,
+        threeDSecureRedirectUrl: widget.threeDSecureRedirectUrl,
       );
+      final state = ref.read(paymentControllerProvider);
+      final requires3DS =
+          state.status == PaymentStatus.requires3ds ||
+              response.metadata?['requires_3ds'] == true ||
+              (response.data?.requiresThreeDS ?? false) ||
+              (response.data?.payment?.threeDs == true);
+
+      if (requires3DS) {
+        final redirectUrl = state.threeDSRedirectUrl ??
+            response.data?.threeDSRedirectUrl ??
+            response.data?.payment?.threeDsUrl;
+        if (redirectUrl != null && response.data != null) {
+          widget.onRequires3DS?.call(redirectUrl, response.data!);
+        } else {
+          widget.onError('Se requiere autenticación 3D Secure');
+        }
+        return;
+      }
       if (response.isSuccess && response.data != null) {
         widget.onSuccess(response.data!);
       } else {

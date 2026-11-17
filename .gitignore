@@ -46,3 +46,6 @@ app.*.map.json
 
 # Local secrets for flutter --dart-define-from-file
 example/dart_defines.local.json
+
+# Notas personales / docs generados
+*.md

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../models/charge_model.dart';
@@ -11,6 +13,7 @@ class PaymentSuccessPage extends StatelessWidget {
   final String? paymentMethodLabel;
   final String? transactionId;
   final DateTime? timestamp;
+  final File? voucherImage;
   final VoidCallback? onShare;
   final VoidCallback? onContinue;
 
@@ -23,6 +26,7 @@ class PaymentSuccessPage extends StatelessWidget {
     this.paymentMethodLabel,
     this.transactionId,
     this.timestamp,
+    this.voucherImage,
     this.onShare,
     this.onContinue,
   });
@@ -102,6 +106,10 @@ class PaymentSuccessPage extends StatelessWidget {
               date: formattedDate,
               time: formattedTime,
             ),
+            if (voucherImage != null) ...[
+              const SizedBox(height: 16),
+              _VoucherPreview(imageFile: voucherImage!),
+            ],
             const SizedBox(height: 24),
             _ActionButtons(
               onShare: onShare,
@@ -144,6 +152,36 @@ class PaymentSuccessPage extends StatelessWidget {
       'diciembre',
     ];
     return months[month - 1];
+  }
+}
+
+class _VoucherPreview extends StatelessWidget {
+  final File imageFile;
+
+  const _VoucherPreview({required this.imageFile});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Comprobante cargado',
+          style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 8),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Image.file(
+            imageFile,
+            width: double.infinity,
+            height: 200,
+            fit: BoxFit.cover,
+          ),
+        ),
+      ],
+    );
   }
 }
 

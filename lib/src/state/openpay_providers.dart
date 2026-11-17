@@ -119,6 +119,8 @@ class PaymentState {
   final TokenModel? lastToken;
   final OpenPayError? error;
   final String? message;
+  final String? threeDSRedirectUrl;
+  final String? threeDSVerificationId;
 
   const PaymentState({
     required this.status,
@@ -126,6 +128,8 @@ class PaymentState {
     this.lastToken,
     this.error,
     this.message,
+    this.threeDSRedirectUrl,
+    this.threeDSVerificationId,
   });
 
   factory PaymentState.initial() => const PaymentState(status: PaymentStatus.idle);
@@ -138,6 +142,10 @@ class PaymentState {
     bool clearError = false,
     String? message,
     bool clearMessage = false,
+    String? threeDSRedirectUrl,
+    bool clearThreeDSRedirectUrl = false,
+    String? threeDSVerificationId,
+    bool clearThreeDSVerificationId = false,
   }) {
     return PaymentState(
       status: status ?? this.status,
@@ -145,12 +153,18 @@ class PaymentState {
       lastToken: lastToken ?? this.lastToken,
       error: clearError ? null : (error ?? this.error),
       message: clearMessage ? null : (message ?? this.message),
+      threeDSRedirectUrl: clearThreeDSRedirectUrl
+          ? null
+          : (threeDSRedirectUrl ?? this.threeDSRedirectUrl),
+      threeDSVerificationId: clearThreeDSVerificationId
+          ? null
+          : (threeDSVerificationId ?? this.threeDSVerificationId),
     );
   }
 }
 
 /// Posibles estados del flujo de pago
-enum PaymentStatus { idle, processing, success, error }
+enum PaymentStatus { idle, processing, success, error, requires3ds }
 
 /// Controlador responsable de orquestar tokenización y cargos
 class PaymentController extends StateNotifier<PaymentState> {
@@ -167,6 +181,8 @@ class PaymentController extends StateNotifier<PaymentState> {
     String? orderId,
     Map<String, dynamic>? metadata,
     String? deviceSessionId,
+    bool useThreeDSecure = false,
+    String? threeDSecureRedirectUrl,
   }) async {
     state = state.copyWith(
       status: PaymentStatus.processing,
@@ -203,7 +219,48 @@ class PaymentController extends StateNotifier<PaymentState> {
         orderId: orderId,
         metadata: metadata,
         deviceSessionId: deviceSessionId,
+        use3DSecure: useThreeDSecure,
+        threeDSecureRedirectUrl: threeDSecureRedirectUrl,
       );
+
+      final requires3ds = response.data?.requiresThreeDS ?? false;
+      if (requires3ds && response.data != null) {
+        final redirectUrl = response.data!.threeDSRedirectUrl ??
+            response.data!.payment?.threeDsUrl ??
+            threeDSecureRedirectUrl;
+        final rawVerificationId =
+            response.data!.payment?.threeDsVerificationId;
+        final verificationId =
+            (rawVerificationId != null && rawVerificationId.isNotEmpty)
+                ? rawVerificationId
+                : null;
+        state = state.copyWith(
+          status: PaymentStatus.requires3ds,
+          lastCharge: response.data,
+          message: response.message ?? 'Se requiere autenticación 3D Secure',
+          clearError: true,
+          threeDSRedirectUrl: redirectUrl,
+          threeDSVerificationId: verificationId ?? response.data!.id,
+        );
+
+        final enrichedMetadata = Map<String, dynamic>.from(
+          response.metadata ?? const {},
+        )
+          ..['requires_3ds'] = true;
+        if (redirectUrl != null) {
+          enrichedMetadata['three_ds_redirect_url'] = redirectUrl;
+        }
+        if (verificationId != null && verificationId.isNotEmpty) {
+          enrichedMetadata['three_ds_verification_id'] = verificationId;
+        }
+
+        return OpenPayResponse.success(
+          data: response.data,
+          message: response.message,
+          statusCode: response.statusCode,
+          metadata: enrichedMetadata,
+        );
+      }
 
       if (response.isSuccess && response.data != null) {
         state = state.copyWith(
@@ -211,12 +268,16 @@ class PaymentController extends StateNotifier<PaymentState> {
           lastCharge: response.data,
           message: response.message ?? 'Pago exitoso',
           clearError: true,
+          clearThreeDSRedirectUrl: true,
+          clearThreeDSVerificationId: true,
         );
       } else {
         state = state.copyWith(
           status: PaymentStatus.error,
           error: _mapError(response.metadata),
           message: response.message ?? 'No se pudo completar el cargo',
+          clearThreeDSRedirectUrl: true,
+          clearThreeDSVerificationId: true,
         );
       }
 
@@ -226,6 +287,8 @@ class PaymentController extends StateNotifier<PaymentState> {
         status: PaymentStatus.error,
         error: OpenPayError.generic(error.toString()),
         message: 'Error de conexión',
+        clearThreeDSRedirectUrl: true,
+        clearThreeDSVerificationId: true,
       );
       return OpenPayResponse.error(
         message: 'Error de conexión',

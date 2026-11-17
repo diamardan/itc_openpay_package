@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 import '../models/card_model.dart';
 import '../utils/card_utils.dart';
 import '../utils/validation_utils.dart';
+import 'payment_assets.dart';
 
 /// Widget de formulario para capturar datos de tarjeta de crédito
 class CreditCardForm extends StatefulWidget {
@@ -42,6 +42,49 @@ class CreditCardForm extends StatefulWidget {
 }
 
 class _CreditCardFormState extends State<CreditCardForm> {
+  void _onFocusChange() {
+    final focusedNodes = [
+      _cardNumberFocusNode,
+      _holderNameFocusNode,
+      _expiryFocusNode,
+      _cvvFocusNode,
+      if (widget.showAddress) ...[
+        _addressLine1FocusNode,
+        _cityFocusNode,
+        _stateFocusNode,
+        _postalCodeFocusNode,
+      ],
+    ];
+    for (final node in focusedNodes) {
+      if (node.hasFocus) {
+        _ensureVisible(node);
+        break;
+      }
+    }
+
+    if (!_cardNumberFocusNode.hasFocus &&
+        !_holderNameFocusNode.hasFocus &&
+        !_expiryFocusNode.hasFocus &&
+        !_cvvFocusNode.hasFocus &&
+        (!widget.showAddress ||
+            (!_addressLine1FocusNode.hasFocus &&
+                !_cityFocusNode.hasFocus &&
+                !_stateFocusNode.hasFocus &&
+                !_postalCodeFocusNode.hasFocus))) {
+      // Si ningún campo tiene foco, validar el formulario
+      _validateForm();
+    }
+  }
+
+  // FocusNodes para detectar pérdida de foco
+  late final FocusNode _cardNumberFocusNode;
+  late final FocusNode _holderNameFocusNode;
+  late final FocusNode _expiryFocusNode;
+  late final FocusNode _cvvFocusNode;
+  late final FocusNode _addressLine1FocusNode;
+  late final FocusNode _cityFocusNode;
+  late final FocusNode _stateFocusNode;
+  late final FocusNode _postalCodeFocusNode;
   final _formKey = GlobalKey<FormState>();
   AutovalidateMode _autoValidateMode = AutovalidateMode.disabled;
 
@@ -62,6 +105,27 @@ class _CreditCardFormState extends State<CreditCardForm> {
 
   @override
   void initState() {
+    // Inicializar FocusNodes
+    _cardNumberFocusNode = FocusNode();
+    _holderNameFocusNode = FocusNode();
+    _expiryFocusNode = FocusNode();
+    _cvvFocusNode = FocusNode();
+    _addressLine1FocusNode = FocusNode();
+    _cityFocusNode = FocusNode();
+    _stateFocusNode = FocusNode();
+    _postalCodeFocusNode = FocusNode();
+
+    // Agregar listeners de foco para validar al perder foco
+    _cardNumberFocusNode.addListener(_onFocusChange);
+    _holderNameFocusNode.addListener(_onFocusChange);
+    _expiryFocusNode.addListener(_onFocusChange);
+    _cvvFocusNode.addListener(_onFocusChange);
+    if (widget.showAddress) {
+      _addressLine1FocusNode.addListener(_onFocusChange);
+      _cityFocusNode.addListener(_onFocusChange);
+      _stateFocusNode.addListener(_onFocusChange);
+      _postalCodeFocusNode.addListener(_onFocusChange);
+    }
     super.initState();
 
     // Inicializar controladores
@@ -157,6 +221,46 @@ class _CreditCardFormState extends State<CreditCardForm> {
     widget.onCardChanged(null);
   }
 
+  void _focusNext(FocusNode? next) {
+    final scope = FocusScope.of(context);
+    if (next == null) {
+      scope.unfocus();
+    } else {
+      scope.requestFocus(next);
+      _ensureVisible(next);
+    }
+  }
+
+  void _handleTap(FocusNode target) {
+    if (!target.hasFocus) {
+      FocusScope.of(context).requestFocus(target);
+    }
+    _ensureVisible(target);
+  }
+
+  void _ensureVisible(FocusNode target) {
+    final targetContext = target.context;
+    if (targetContext == null) {
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      final contextForNode = target.context;
+      if (contextForNode == null) {
+        return;
+      }
+      Scrollable.ensureVisible(
+        contextForNode,
+        duration: const Duration(milliseconds: 250),
+        alignment: 0.2,
+        curve: Curves.easeInOut,
+      );
+    });
+  }
+
   CardModel? _buildCardFromInputs() {
     try {
       final expiryParts = CardUtils.parseExpiryDate(_expiryController.text);
@@ -193,6 +297,25 @@ class _CreditCardFormState extends State<CreditCardForm> {
 
   @override
   void dispose() {
+    _cardNumberFocusNode.removeListener(_onFocusChange);
+    _holderNameFocusNode.removeListener(_onFocusChange);
+    _expiryFocusNode.removeListener(_onFocusChange);
+    _cvvFocusNode.removeListener(_onFocusChange);
+    if (widget.showAddress) {
+      _addressLine1FocusNode.removeListener(_onFocusChange);
+      _cityFocusNode.removeListener(_onFocusChange);
+      _stateFocusNode.removeListener(_onFocusChange);
+      _postalCodeFocusNode.removeListener(_onFocusChange);
+    }
+
+    _cardNumberFocusNode.dispose();
+    _holderNameFocusNode.dispose();
+    _expiryFocusNode.dispose();
+    _cvvFocusNode.dispose();
+    _addressLine1FocusNode.dispose();
+    _cityFocusNode.dispose();
+    _stateFocusNode.dispose();
+    _postalCodeFocusNode.dispose();
     _cardNumberController.dispose();
     _holderNameController.dispose();
     _expiryController.dispose();
@@ -219,20 +342,24 @@ class _CreditCardFormState extends State<CreditCardForm> {
           // Número de tarjeta
           TextFormField(
             controller: _cardNumberController,
+            focusNode: _cardNumberFocusNode,
             enabled: widget.enabled,
             decoration: style.inputDecoration.copyWith(
               labelText: 'Número de tarjeta',
-              hintText: '1234 5678 9012 3456',
+              hintText: null,
               suffixIcon: _cardType != null
                   ? Icon(_getCardIcon(_cardType!), color: style.primaryColor)
                   : null,
             ),
             keyboardType: TextInputType.number,
+            textInputAction: TextInputAction.next,
             inputFormatters: [
               FilteringTextInputFormatter.digitsOnly,
-              LengthLimitingTextInputFormatter(19),
               _CardNumberFormatter(),
             ],
+            onTap: () => _handleTap(_cardNumberFocusNode),
+            onFieldSubmitted: (_) => _focusNext(_expiryFocusNode),
+            onEditingComplete: () => _focusNext(_expiryFocusNode),
             validator: (value) {
               if (!ValidationUtils.isNotEmpty(value)) {
                 return 'Ingresa el número de tarjeta';
@@ -246,37 +373,7 @@ class _CreditCardFormState extends State<CreditCardForm> {
 
           const SizedBox(height: 8),
           const _AcceptedBrandsRow(),
-
           SizedBox(height: style.spacing),
-
-          // Nombre del titular
-          TextFormField(
-            controller: _holderNameController,
-            enabled: widget.enabled,
-            decoration: style.inputDecoration.copyWith(
-              labelText: 'Nombre del titular',
-              hintText: null,
-            ),
-            keyboardType: TextInputType.name,
-            textCapitalization: TextCapitalization.words,
-            inputFormatters: [
-              FilteringTextInputFormatter.allow(
-                  RegExp(r'[a-zA-ZÀ-ÿ\u00f1\u00d1\s]')),
-              LengthLimitingTextInputFormatter(50),
-            ],
-            validator: (value) {
-              if (!ValidationUtils.isNotEmpty(value)) {
-                return 'Ingresa el nombre del titular';
-              }
-              if (!CardUtils.validateHolderName(value!)) {
-                return 'Ingresa nombre y apellido';
-              }
-              return null;
-            },
-          ),
-
-          SizedBox(height: style.spacing),
-
           // Expiración y CVV
           Row(
             children: [
@@ -285,17 +382,22 @@ class _CreditCardFormState extends State<CreditCardForm> {
                 flex: 2,
                 child: TextFormField(
                   controller: _expiryController,
+                  focusNode: _expiryFocusNode,
                   enabled: widget.enabled,
                   decoration: style.inputDecoration.copyWith(
                     labelText: 'Expiración',
                     hintText: 'MM/AA',
                   ),
                   keyboardType: TextInputType.number,
+                  textInputAction: TextInputAction.next,
                   inputFormatters: [
                     FilteringTextInputFormatter.digitsOnly,
                     LengthLimitingTextInputFormatter(4),
                     _ExpiryDateFormatter(),
                   ],
+                  onTap: () => _handleTap(_expiryFocusNode),
+                  onFieldSubmitted: (_) => _focusNext(_cvvFocusNode),
+                  onEditingComplete: () => _focusNext(_cvvFocusNode),
                   validator: (value) {
                     if (!ValidationUtils.isNotEmpty(value)) {
                       return 'Ingresa la fecha';
@@ -319,6 +421,7 @@ class _CreditCardFormState extends State<CreditCardForm> {
               Expanded(
                 child: TextFormField(
                   controller: _cvvController,
+                  focusNode: _cvvFocusNode,
                   enabled: widget.enabled,
                   decoration: style.inputDecoration.copyWith(
                     labelText: 'CVV',
@@ -326,10 +429,28 @@ class _CreditCardFormState extends State<CreditCardForm> {
                   ),
                   keyboardType: TextInputType.number,
                   obscureText: true,
+                  textInputAction: widget.showAddress
+                      ? TextInputAction.next
+                      : TextInputAction.done,
                   inputFormatters: [
                     FilteringTextInputFormatter.digitsOnly,
                     LengthLimitingTextInputFormatter(4),
                   ],
+                  onTap: () => _handleTap(_cvvFocusNode),
+                  onFieldSubmitted: (_) {
+                    if (widget.showAddress) {
+                      _focusNext(_addressLine1FocusNode);
+                    } else {
+                      _focusNext(_holderNameFocusNode);
+                    }
+                  },
+                  onEditingComplete: () {
+                    if (widget.showAddress) {
+                      _focusNext(_addressLine1FocusNode);
+                    } else {
+                      _focusNext(_holderNameFocusNode);
+                    }
+                  },
                   validator: (value) {
                     if (!ValidationUtils.isNotEmpty(value)) {
                       return 'Ingresa CVV';
@@ -343,7 +464,6 @@ class _CreditCardFormState extends State<CreditCardForm> {
               ),
             ],
           ),
-
           // Campos de dirección (opcional)
           if (widget.showAddress) ...[
             SizedBox(height: style.spacing * 1.5),
@@ -360,12 +480,17 @@ class _CreditCardFormState extends State<CreditCardForm> {
             // Dirección línea 1
             TextFormField(
               controller: _addressLine1Controller,
+              focusNode: _addressLine1FocusNode,
               enabled: widget.enabled,
               decoration: style.inputDecoration.copyWith(
                 labelText: 'Dirección',
                 hintText: 'Calle y número',
               ),
               textCapitalization: TextCapitalization.words,
+              textInputAction: TextInputAction.next,
+              onTap: () => _handleTap(_addressLine1FocusNode),
+              onFieldSubmitted: (_) => _focusNext(_cityFocusNode),
+              onEditingComplete: () => _focusNext(_cityFocusNode),
               validator: widget.showAddress
                   ? (value) {
                       if (!ValidationUtils.isNotEmpty(value)) {
@@ -399,11 +524,16 @@ class _CreditCardFormState extends State<CreditCardForm> {
                   flex: 2,
                   child: TextFormField(
                     controller: _cityController,
+                    focusNode: _cityFocusNode,
                     enabled: widget.enabled,
                     decoration: style.inputDecoration.copyWith(
                       labelText: 'Ciudad',
                     ),
                     textCapitalization: TextCapitalization.words,
+                    textInputAction: TextInputAction.next,
+                    onTap: () => _handleTap(_cityFocusNode),
+                    onFieldSubmitted: (_) => _focusNext(_stateFocusNode),
+                    onEditingComplete: () => _focusNext(_stateFocusNode),
                     validator: widget.showAddress
                         ? (value) {
                             if (!ValidationUtils.isNotEmpty(value)) {
@@ -422,11 +552,16 @@ class _CreditCardFormState extends State<CreditCardForm> {
                   flex: 2,
                   child: TextFormField(
                     controller: _stateController,
+                    focusNode: _stateFocusNode,
                     enabled: widget.enabled,
                     decoration: style.inputDecoration.copyWith(
                       labelText: 'Estado',
                     ),
                     textCapitalization: TextCapitalization.words,
+                    textInputAction: TextInputAction.next,
+                    onTap: () => _handleTap(_stateFocusNode),
+                    onFieldSubmitted: (_) => _focusNext(_postalCodeFocusNode),
+                    onEditingComplete: () => _focusNext(_postalCodeFocusNode),
                     validator: widget.showAddress
                         ? (value) {
                             if (!ValidationUtils.isNotEmpty(value)) {
@@ -444,15 +579,20 @@ class _CreditCardFormState extends State<CreditCardForm> {
                 Expanded(
                   child: TextFormField(
                     controller: _postalCodeController,
+                    focusNode: _postalCodeFocusNode,
                     enabled: widget.enabled,
                     decoration: style.inputDecoration.copyWith(
                       labelText: 'CP',
                     ),
                     keyboardType: TextInputType.number,
+                    textInputAction: TextInputAction.next,
                     inputFormatters: [
                       FilteringTextInputFormatter.digitsOnly,
                       LengthLimitingTextInputFormatter(5),
                     ],
+                    onTap: () => _handleTap(_postalCodeFocusNode),
+                    onFieldSubmitted: (_) => _focusNext(_holderNameFocusNode),
+                    onEditingComplete: () => _focusNext(_holderNameFocusNode),
                     validator: widget.showAddress
                         ? (value) {
                             if (!ValidationUtils.isNotEmpty(value)) {
@@ -470,6 +610,47 @@ class _CreditCardFormState extends State<CreditCardForm> {
               ],
             ),
           ],
+
+          SizedBox(height: style.spacing * 1.5),
+
+          // Nombre del titular (al final)
+          TextFormField(
+            controller: _holderNameController,
+            focusNode: _holderNameFocusNode,
+            enabled: widget.enabled,
+            decoration: style.inputDecoration.copyWith(
+              labelText: 'Nombre del titular',
+              hintText: null,
+            ),
+            keyboardType: TextInputType.name,
+            textInputAction: TextInputAction.done,
+            textCapitalization: TextCapitalization.characters,
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(
+                RegExp(r'[a-zA-ZÀ-ÿ\u00f1\u00d1\s]'),
+              ),
+              LengthLimitingTextInputFormatter(50),
+              UpperCaseTextFormatter(),
+            ],
+            onTap: () => _handleTap(_holderNameFocusNode),
+            onFieldSubmitted: (_) {
+              _focusNext(null);
+              _validateForm();
+            },
+            onEditingComplete: () {
+              _focusNext(null);
+              _validateForm();
+            },
+            validator: (value) {
+              if (!ValidationUtils.isNotEmpty(value)) {
+                return 'Ingresa el nombre del titular';
+              }
+              if (!CardUtils.validateHolderName(value!)) {
+                return 'Ingresa nombre y apellido';
+              }
+              return null;
+            },
+          ),
         ],
       ),
     );
@@ -492,34 +673,55 @@ class _CreditCardFormState extends State<CreditCardForm> {
 class _AcceptedBrandsRow extends StatelessWidget {
   const _AcceptedBrandsRow();
 
+  static const List<PaymentBrandAsset> _brandAssets = [
+    PaymentBrandAsset(
+      label: 'Visa',
+      assetPath: 'assets/images/cards/visa.png',
+    ),
+    PaymentBrandAsset(
+      label: 'Mastercard',
+      assetPath: 'assets/images/cards/masterCard.png',
+    ),
+    PaymentBrandAsset(
+      label: 'American Express',
+      assetPath: 'assets/images/cards/americanExpress.png',
+    ),
+    PaymentBrandAsset(
+      label: 'Openpay',
+      assetPath: 'assets/images/cards/LogotipoOpenpay-02.jpg',
+    ),
+  ];
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final iconColor = theme.colorScheme.onSurface.withValues(alpha: 0.8);
-
-    const icons = [
-      FontAwesomeIcons.ccVisa,
-      FontAwesomeIcons.ccMastercard,
-      FontAwesomeIcons.ccAmex,
-      FontAwesomeIcons.ccDiscover
-    ];
-
     return Row(
-      mainAxisAlignment: MainAxisAlignment.start,
-      children: icons
-          .map(
-            (icon) => Expanded(
-              child: Align(
-                alignment: Alignment.center,
-                child: FaIcon(
-                  icon,
-                  size: 32,
-                  color: iconColor,
-                ),
-              ),
+      children: _brandAssets.map((asset) {
+        return Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: Image.asset(
+              asset.assetPath,
+              package: 'itc_openpay_package',
+              height: 32,
+              fit: BoxFit.contain,
             ),
-          )
-          .toList(),
+          ),
+        );
+      }).toList(),
+    );
+  }
+}
+
+class UpperCaseTextFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final upperText = newValue.text.toUpperCase();
+    return newValue.copyWith(
+      text: upperText,
+      selection: newValue.selection,
     );
   }
 }
@@ -531,8 +733,16 @@ class _CardNumberFormatter extends TextInputFormatter {
     TextEditingValue oldValue,
     TextEditingValue newValue,
   ) {
-    final text = newValue.text.replaceAll(' ', '');
-    final formatted = CardUtils.formatCardNumber(text);
+    final digits = newValue.text.replaceAll(' ', '');
+    final cardType = CardUtils.detectCardType(digits);
+    final maxDigits = CardUtils.maxCardDigits(cardType);
+
+    String sanitized = digits;
+    if (sanitized.length > maxDigits) {
+      sanitized = sanitized.substring(0, maxDigits);
+    }
+
+    final formatted = CardUtils.formatCardNumber(sanitized);
 
     return TextEditingValue(
       text: formatted,

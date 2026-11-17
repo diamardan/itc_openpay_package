@@ -1,14 +1,23 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path/path.dart' as path;
+import 'package:path_provider/path_provider.dart';
 
 import '../models/card_model.dart';
 import '../models/charge_model.dart';
 import '../models/customer_model.dart';
+import '../models/saved_card_summary.dart';
+import '../models/voucher_upload_result.dart';
 import '../utils/device_session_utils.dart';
 import 'convenience_store_grid.dart';
 import 'credit_card_form.dart';
 import 'payment_assets.dart';
+import 'payment_method_selector.dart';
 import 'payment_button.dart';
+import 'voucher_upload_section.dart';
 
 /// Pantalla lista para usar enfocada en pagos inmediatos con tarjeta.
 /// Replica la experiencia visual del flujo oficial de OpenPay.
@@ -20,9 +29,19 @@ class OpenPayCheckoutScreen extends ConsumerStatefulWidget {
   final List<PaymentBrandAsset> cardBrands;
   final List<ConvenienceStoreOption> storeOptions;
   final bool enableStorePayments;
+  final Set<CheckoutPaymentType> paymentTypes;
+  final List<CheckoutPaymentType>? visiblePaymentOptions;
+  final List<SavedCardSummary> savedCards;
   final void Function(ChargeModel charge)? onPaymentSuccess;
   final void Function(String message)? onPaymentError;
   final void Function(ConvenienceStoreOption store)? onStoreSelected;
+  final ValueChanged<SavedCardSummary>? onSavedCardSelected;
+  final VoidCallback? onStorePaymentRequested;
+  final ValueChanged<VoucherUploadResult>? onVoucherSubmitted;
+  final ValueChanged<VoucherUploadResult>? onVoucherChanged;
+  final bool showVoucherCheckbox;
+  final String voucherCheckboxLabel;
+  final bool voucherCheckboxInitialValue;
   final Widget? header;
   final String? deviceSessionId;
 
@@ -35,9 +54,20 @@ class OpenPayCheckoutScreen extends ConsumerStatefulWidget {
     this.cardBrands = kDefaultCardBrands,
     this.storeOptions = kDefaultStoreOptions,
     this.enableStorePayments = true,
+    this.paymentTypes = const {CheckoutPaymentType.card, CheckoutPaymentType.store},
+  this.visiblePaymentOptions,
+    this.savedCards = const [],
     this.onPaymentSuccess,
     this.onPaymentError,
     this.onStoreSelected,
+    this.onSavedCardSelected,
+    this.onStorePaymentRequested,
+  this.onVoucherSubmitted,
+  this.onVoucherChanged,
+  this.showVoucherCheckbox = true,
+  this.voucherCheckboxLabel =
+    'Declaro que la imagen que estoy subiendo pertenece a un pago.',
+  this.voucherCheckboxInitialValue = false,
     this.header,
     this.deviceSessionId,
   });
@@ -47,35 +77,64 @@ class OpenPayCheckoutScreen extends ConsumerStatefulWidget {
       _OpenPayCheckoutScreenState();
 }
 
-enum _CheckoutMethod { card, store }
-
 class _OpenPayCheckoutScreenState extends ConsumerState<OpenPayCheckoutScreen> {
   bool _isFormValid = false;
   CardModel? _currentCard;
-  ConvenienceStoreOption? _selectedStore;
   late final String _deviceSessionId;
-  late _CheckoutMethod _checkoutMethod;
+  late CheckoutPaymentType _checkoutMethod;
+  String? _selectedSavedCardToken;
+  File? _voucherImage;
+  late bool _voucherIsPaymentProof;
+  final ImagePicker _imagePicker = ImagePicker();
+
+  static const List<CheckoutPaymentType> _defaultPaymentOrder = [
+    CheckoutPaymentType.card,
+    CheckoutPaymentType.store,
+    CheckoutPaymentType.voucherUpload,
+  ];
 
   @override
   void initState() {
     super.initState();
     _deviceSessionId =
         widget.deviceSessionId ?? DeviceSessionUtils.generateSessionId();
-    _checkoutMethod = _CheckoutMethod.card;
+  _checkoutMethod = _effectivePaymentOptions.first;
+  _voucherIsPaymentProof = widget.voucherCheckboxInitialValue;
   }
 
   @override
   void didUpdateWidget(covariant OpenPayCheckoutScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!_hasStorePayments && _checkoutMethod == _CheckoutMethod.store) {
+    if (!_effectivePaymentOptions.contains(_checkoutMethod)) {
       setState(() {
-        _checkoutMethod = _CheckoutMethod.card;
+        _checkoutMethod = _effectivePaymentOptions.first;
       });
     }
   }
 
+  List<CheckoutPaymentType> get _effectivePaymentOptions {
+    final explicitOptions = widget.visiblePaymentOptions;
+    final options = (explicitOptions != null && explicitOptions.isNotEmpty)
+        ? explicitOptions.toList()
+        : _defaultPaymentOrder
+            .where((type) => widget.paymentTypes.contains(type))
+            .toList();
+
+    if (!widget.enableStorePayments) {
+      options.remove(CheckoutPaymentType.store);
+    }
+    if (widget.storeOptions.isEmpty) {
+      options.remove(CheckoutPaymentType.store);
+    }
+    if (options.isEmpty) {
+      return [CheckoutPaymentType.card];
+    }
+    return options;
+  }
+
   bool get _hasStorePayments =>
-      widget.enableStorePayments && widget.storeOptions.isNotEmpty;
+      _effectivePaymentOptions.contains(CheckoutPaymentType.store) &&
+      widget.storeOptions.isNotEmpty;
 
   @override
   Widget build(BuildContext context) {
@@ -118,6 +177,15 @@ class _OpenPayCheckoutScreenState extends ConsumerState<OpenPayCheckoutScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Center(
+            child: Image.asset(
+              'assets/images/cards/LogotipoOpenpay-01.jpg',
+              package: 'itc_openpay_package',
+              height: 40,
+              fit: BoxFit.contain,
+            ),
+          ),
+          const SizedBox(height: 16),
           Text(
             'Pago Seguro',
             style:
@@ -129,18 +197,22 @@ class _OpenPayCheckoutScreenState extends ConsumerState<OpenPayCheckoutScreen> {
             style:
                 theme.textTheme.bodyMedium?.copyWith(color: Colors.grey.shade600),
           ),
-          if (_hasStorePayments) ...[
+          if (_effectivePaymentOptions.length > 1) ...[
             const SizedBox(height: 20),
-            _MethodToggleBar(
+            PaymentMethodSelector(
               selected: _checkoutMethod,
-              onChanged: (value) => setState(() => _checkoutMethod = value),
+              availableTypes: _effectivePaymentOptions,
+              onChanged: (CheckoutPaymentType value) =>
+                  setState(() => _checkoutMethod = value),
             ),
           ],
           const SizedBox(height: 24),
-          if (_checkoutMethod == _CheckoutMethod.card || !_hasStorePayments)
+          if (_checkoutMethod == CheckoutPaymentType.card || !_hasStorePayments)
             _buildCardSection(context)
+          else if (_checkoutMethod == CheckoutPaymentType.store)
+            _buildStoreSection(context)
           else
-            _buildStoreSection(context),
+            _buildVoucherSection(context),
         ],
       ),
     );
@@ -204,6 +276,10 @@ class _OpenPayCheckoutScreenState extends ConsumerState<OpenPayCheckoutScreen> {
           style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 12),
+        if (widget.savedCards.isNotEmpty) ...[
+          _buildSavedCardsSection(theme),
+          const SizedBox(height: 12),
+        ],
         CreditCardForm(
           onCardChanged: (card) => setState(() {
             _currentCard = card;
@@ -216,6 +292,39 @@ class _OpenPayCheckoutScreenState extends ConsumerState<OpenPayCheckoutScreen> {
         ),
         const SizedBox(height: 20),
         _buildPaymentButtonArea(context),
+      ],
+    );
+  }
+
+  Widget _buildSavedCardsSection(ThemeData theme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Tarjetas guardadas',
+          style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: widget.savedCards.map((card) {
+            final isSelected = _selectedSavedCardToken == card.tokenId;
+            return ChoiceChip(
+              label: Text(card.displayLabel),
+              selected: isSelected,
+              avatar: Icon(
+                Icons.credit_card,
+                size: 18,
+                color: isSelected ? Colors.white : theme.colorScheme.primary,
+              ),
+              onSelected: (_) {
+                setState(() => _selectedSavedCardToken = card.tokenId);
+                widget.onSavedCardSelected?.call(card);
+              },
+            );
+          }).toList(),
+        ),
       ],
     );
   }
@@ -250,7 +359,6 @@ class _OpenPayCheckoutScreenState extends ConsumerState<OpenPayCheckoutScreen> {
   }
 
   Widget _buildStoreSection(BuildContext context) {
-    final store = _selectedStore;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -262,35 +370,97 @@ class _OpenPayCheckoutScreenState extends ConsumerState<OpenPayCheckoutScreen> {
               ?.copyWith(fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 12),
-        ConvenienceStoreGrid(
+        StorePaymentCard(
+          title: 'Tiendas afiliadas',
+          subtitle:
+              'Tu referencia será válida en cualquiera de estas cadenas.',
           stores: widget.storeOptions,
-          selected: store,
-          onSelected: (selected) => setState(() => _selectedStore = selected),
-        ),
-        const SizedBox(height: 16),
-        if (store != null) ...[
-          Text(
-            'Instrucciones',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 8),
-          Text(store.instructions,
-              style: Theme.of(context).textTheme.bodyMedium),
-          const SizedBox(height: 16),
-          SizedBox(
+          footer: SizedBox(
             width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () => widget.onStoreSelected?.call(store),
+            child: FilledButton.icon(
+              onPressed: _handleStorePaymentRequest,
               icon: const Icon(Icons.receipt_long),
-              label: const Text('Generar referencia de pago'),
+              label: const Text('Generar referencia'),
             ),
           ),
-        ] else
-          const _StoreHelperText(
-            icon: Icons.store,
-            text: 'Selecciona una tienda para generar tu referencia.',
-          ),
+        ),
       ],
+    );
+  }
+
+  void _handleStorePaymentRequest() {
+    widget.onStorePaymentRequested?.call();
+  }
+
+  Widget _buildVoucherSection(BuildContext context) {
+    return VoucherUploadSection(
+      imageFile: _voucherImage,
+      onPickFromCamera: () => _handleVoucherPick(ImageSource.camera),
+      onPickFromGallery: () => _handleVoucherPick(ImageSource.gallery),
+  onRemoveImage: _voucherImage == null
+      ? null
+      : () => setState(() => _voucherImage = null),
+      showCheckbox: widget.showVoucherCheckbox,
+      checkboxValue: _voucherIsPaymentProof,
+      onCheckboxChanged: (value) {
+        setState(() => _voucherIsPaymentProof = value);
+        _notifyVoucherChanged();
+      },
+      checkboxLabel: widget.voucherCheckboxLabel,
+      onSubmit: _voucherImage != null ? _handleVoucherSubmit : null,
+      isSubmitEnabled: _voucherImage != null,
+    );
+  }
+
+  Future<void> _handleVoucherPick(ImageSource source) async {
+    final picked = await _imagePicker.pickImage(
+      source: source,
+      imageQuality: 85,
+      maxWidth: 1920,
+    );
+
+    if (picked == null) return;
+
+    final storedFile = await _persistVoucherImage(picked);
+    setState(() => _voucherImage = storedFile);
+    _notifyVoucherChanged();
+  }
+
+  Future<File> _persistVoucherImage(XFile picked) async {
+    final directory = await getApplicationDocumentsDirectory();
+    final vouchersDir = Directory(path.join(directory.path, 'openpay_vouchers'));
+    if (!await vouchersDir.exists()) {
+      await vouchersDir.create(recursive: true);
+    }
+    final extension = path.extension(picked.path).isNotEmpty
+        ? path.extension(picked.path)
+        : '.jpg';
+    final fileName =
+        'voucher_${DateTime.now().millisecondsSinceEpoch}$extension';
+    final storedPath = path.join(vouchersDir.path, fileName);
+    return File(picked.path).copy(storedPath);
+  }
+
+  void _handleVoucherSubmit() {
+    final image = _voucherImage;
+    if (image == null) return;
+    final result = VoucherUploadResult(
+      imageFile: image,
+      localPath: image.path,
+      isPaymentProof: _voucherIsPaymentProof,
+    );
+    widget.onVoucherSubmitted?.call(result);
+  }
+
+  void _notifyVoucherChanged() {
+    final image = _voucherImage;
+    if (image == null) return;
+    widget.onVoucherChanged?.call(
+      VoucherUploadResult(
+        imageFile: image,
+        localPath: image.path,
+        isPaymentProof: _voucherIsPaymentProof,
+      ),
     );
   }
 
@@ -453,113 +623,6 @@ class _DisabledPaymentButton extends StatelessWidget {
   }
 }
 
-class _StoreHelperText extends StatelessWidget {
-  final IconData icon;
-  final String text;
-
-  const _StoreHelperText({required this.icon, required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, color: Theme.of(context).colorScheme.primary),
-        const SizedBox(width: 8),
-        Expanded(child: Text(text)),
-      ],
-    );
-  }
-}
-
-class _MethodToggleBar extends StatelessWidget {
-  final _CheckoutMethod selected;
-  final ValueChanged<_CheckoutMethod> onChanged;
-
-  const _MethodToggleBar({required this.selected, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      children: [
-        _MethodChip(
-          label: 'Tarjeta de Crédito/Débito',
-          icon: Icons.credit_card,
-          selected: selected == _CheckoutMethod.card,
-          onTap: () => onChanged(_CheckoutMethod.card),
-          theme: theme,
-        ),
-        const SizedBox(width: 12),
-        _MethodChip(
-          label: 'Pago en Tienda',
-          icon: Icons.store,
-          selected: selected == _CheckoutMethod.store,
-          onTap: () => onChanged(_CheckoutMethod.store),
-          theme: theme,
-        ),
-      ],
-    );
-  }
-}
-
-class _MethodChip extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final bool selected;
-  final VoidCallback onTap;
-  final ThemeData theme;
-
-  const _MethodChip({
-    required this.label,
-    required this.icon,
-    required this.selected,
-    required this.onTap,
-    required this.theme,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-  const selectedColor = Color(0xFF0D5EF4);
-    return Expanded(
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
-          decoration: BoxDecoration(
-            color: selected ? selectedColor : const Color(0xFFF1F3F8),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: selected ? selectedColor : const Color(0xFFE1E5EF),
-            ),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                color: selected ? Colors.white : Colors.black54,
-              ),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  label,
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                        color: selected ? Colors.white : Colors.black87,
-                        fontWeight: FontWeight.w600,
-                      ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _OpenPayLogoHeader extends StatelessWidget {
   const _OpenPayLogoHeader();
 
@@ -567,10 +630,13 @@ class _OpenPayLogoHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        CircleAvatar(
-          radius: 28,
-          backgroundColor: Colors.cyan.shade50,
-          child: const Icon(Icons.lock_outline, color: Colors.cyan),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.asset(
+            'assets/images/cards/LogotipoOpenpay-01.jpg',
+            package: 'itc_openpay_package',
+            height: 56,
+          ),
         ),
         const SizedBox(width: 12),
         const Column(
@@ -578,7 +644,8 @@ class _OpenPayLogoHeader extends StatelessWidget {
           children: [
             Text('Openpay BBVA',
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
-            Text('Pagos seguros', style: TextStyle(color: Colors.black54)),
+            Text('Pagos procesados de forma segura',
+                style: TextStyle(color: Colors.black54)),
           ],
         ),
       ],

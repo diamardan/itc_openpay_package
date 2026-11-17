@@ -77,6 +77,18 @@ class CardUtils {
     
     return null;
   }
+
+  /// Obtener la cantidad máxima de dígitos permitidos por tipo de tarjeta
+  static int maxCardDigits(String? cardType) {
+    switch (cardType) {
+      case 'american_express':
+        return 15;
+      case 'maestro':
+        return 16;
+      default:
+        return 16;
+    }
+  }
   
   /// Obtener el nombre amigable del tipo de tarjeta
   static String? getCardTypeName(String? cardType) {
